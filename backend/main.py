@@ -62,6 +62,7 @@ class RejectRequest(BaseModel):
 async def _investigate(incident):
     """Run investigator + guardian for a new incident, then audit both."""
     incident["status"] = "investigating"
+    store.add_timeline(incident, "investigating", "reading logs and metrics")
     logs = list(store.LOGS[incident["service"]])
     metrics = list(store.METRICS[incident["service"]])
     # Investigator is sync (urllib); run it in a thread so the sampler keeps ticking.
@@ -69,6 +70,11 @@ async def _investigate(incident):
     incident["investigation"] = result
     incident["guardian"] = guardian.evaluate(result["confidence"])
     incident["status"] = incident["guardian"]["decision"]
+    store.add_timeline(
+        incident, "guardian_decision",
+        f"{incident['guardian']['decision']} — confidence {result['confidence']}% "
+        f"(source: {result['source']})",
+    )
     audit.log(
         incident["id"], "investigator", "investigation_done",
         f"source={result['source']} confidence={result['confidence']} cause={result['cause']}",
@@ -116,6 +122,38 @@ def root():
 @app.get("/health")
 def get_health():
     return simulator.health()
+
+
+@app.get("/logs")
+def get_logs(limit: int = 50):
+    """Recent simulator log lines across all services, newest first.
+
+    Log lines are stored as plain strings ("ts [LEVEL] service: message")
+    so they are parsed back into structured entries here.
+    """
+    import re
+
+    limit = max(1, min(int(limit), 100))
+    pattern = re.compile(r"^(\S+) \[(\w+)\] (\w+): (.*)$")
+    entries = []
+    for service, lines in store.LOGS.items():
+        for line in lines:
+            m = pattern.match(line)
+            if m:
+                entries.append(
+                    {
+                        "ts": m.group(1),
+                        "service": m.group(3),
+                        "level": m.group(2),
+                        "message": m.group(4),
+                    }
+                )
+            else:
+                entries.append(
+                    {"ts": "", "service": service, "level": "INFO", "message": line}
+                )
+    entries.sort(key=lambda e: e["ts"], reverse=True)
+    return {"logs": entries[:limit]}
 
 
 @app.get("/metrics")
@@ -184,6 +222,10 @@ async def approve_incident(incident_id: str, req: ApproveRequest):
             detail="Guardian has not cleared this incident for approval",
         )
     incident["approved_by"] = req.approved_by
+    store.add_timeline(
+        incident, "approved",
+        f"approved by {req.approved_by} — action: {req.action}",
+    )
     audit.log(incident["id"], req.approved_by, "approved", f"action={req.action}")
     # Executor recovers the service, waits 10s, then checks health.
     await executor.execute_fix(incident, req.approved_by)
@@ -197,6 +239,7 @@ def reject_incident(incident_id: str, req: RejectRequest):
         raise HTTPException(status_code=404, detail="incident not found")
     incident["status"] = "rejected"
     incident["resolution"] = req.reason or "Rejected by human reviewer."
+    store.add_timeline(incident, "rejected", incident["resolution"])
     audit.log(incident["id"], req.rejected_by, "rejected", incident["resolution"])
     return incident
 

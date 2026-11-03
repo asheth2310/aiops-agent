@@ -52,9 +52,19 @@ def tick():
             status = "healthy"
             _log(name, "INFO", f"request ok in {latency}ms")
 
+        # Real request volume: a degraded service serves fewer requests.
+        requests = random.randint(15, 50) if svc["broken"] else random.randint(40, 120)
+        svc["total_requests"] += requests
+        store.REQUEST_SNAPSHOTS[name].append(
+            (store.now_iso(), svc["total_requests"])
+        )
+
         svc["latency_ms"] = latency
         svc["error_rate"] = error_rate
         svc["status"] = status
+        svc["ticks"] += 1
+        if status == "healthy":
+            svc["healthy_ticks"] += 1
         sample = {
             "ts": store.now_iso(),
             "latency_ms": latency,
@@ -103,8 +113,15 @@ def health():
                 "error_rate": svc["error_rate"],
                 "broken": svc["broken"],
                 "break_type": svc["break_type"],
+                "total_requests": svc["total_requests"],
+                "requests_per_min": store.requests_per_min(name),
+                "uptime_pct": (
+                    round(svc["healthy_ticks"] / svc["ticks"] * 100, 1)
+                    if svc["ticks"]
+                    else 100.0
+                ),
             }
-            for svc in store.SERVICES.values()
+            for name, svc in store.SERVICES.items()
         ],
         "generated_at": store.now_iso(),
     }

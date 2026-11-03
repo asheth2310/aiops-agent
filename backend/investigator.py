@@ -135,7 +135,16 @@ def _parse_result(text, logs):
 
 
 def investigate(incident, logs, recent_metrics):
-    """Run the investigation. Returns a result dict with a 'source' field."""
+    """Run the investigation. Returns a result dict with a 'source' field.
+
+    The returned result also carries 'confidence_breakdown' and 'input',
+    both computed from the real data that was reviewed — never hardcoded:
+    - evidence_match: how many of the 3 quoted evidence lines are real
+      log lines (verified per line against the logs sent in)
+    - metric_severity_x: triggered value ÷ threshold (e.g. 1.6x)
+    - log_signal_n: ERROR/WARN lines among the log lines reviewed
+    - input: what the investigator was given (metric, counts, window)
+    """
     logs = list(logs)[-20:]
     metrics_text = "\n".join(
         f"{m['ts']} latency={m['latency_ms']}ms error_rate={m['error_rate']} status={m['status']}"
@@ -156,13 +165,51 @@ def investigate(incident, logs, recent_metrics):
     )
 
     if os.environ.get("GEMINI_LIVE", "0") != "1":
-        return _mock_result(incident, logs)
+        result = _mock_result(incident, logs)
+    else:
+        result = None
+        for _attempt in range(2):  # first try + one retry on bad / hallucinated output
+            text = _call_gemini_helper(prompt)
+            parsed = _parse_result(text, logs)
+            if parsed:
+                result = parsed
+                break
+        if result is None:
+            result = _mock_result(incident, logs)
+            result["source"] = "mock-fallback"
 
-    for _attempt in range(2):  # first try + one retry on bad / hallucinated output
-        text = _call_gemini_helper(prompt)
-        parsed = _parse_result(text, logs)
-        if parsed:
-            return parsed
-    result = _mock_result(incident, logs)
-    result["source"] = "mock-fallback"
+    result["confidence_breakdown"] = _confidence_breakdown(
+        incident, result, logs
+    )
+    result["input"] = {
+        "metric": incident["metric"],
+        "value": incident["value"],
+        "threshold": incident["threshold"],
+        "log_lines_reviewed": len(logs),
+        "metrics_samples_reviewed": min(len(recent_metrics), 12),
+        "window": "last 20 log lines + last 12 metric samples (1 min)",
+    }
     return result
+
+
+def _confidence_breakdown(incident, result, logs):
+    """Three factors behind the confidence score, from real reviewed data."""
+    evidence = result.get("evidence") or []
+    matched = sum(
+        1
+        for line in evidence
+        if str(line).strip()
+        and any(str(line).strip() in real or real.strip() == str(line).strip()
+                for real in logs)
+    )
+    threshold = incident["threshold"] or 1
+    severity = round(incident["value"] / threshold, 1)
+    signal = sum(1 for line in logs if "ERROR" in line or "WARN" in line)
+    return {
+        "evidence_match": f"{matched}/{len(evidence) or 3}",
+        "evidence_match_n": matched,
+        "evidence_total": len(evidence) or 3,
+        "metric_severity_x": severity,
+        "log_signal_n": signal,
+        "log_lines_reviewed": len(logs),
+    }

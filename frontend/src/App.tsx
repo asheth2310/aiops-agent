@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Service = {
   name: string;
@@ -7,6 +7,9 @@ type Service = {
   error_rate: number;
   broken: boolean;
   break_type: string | null;
+  total_requests: number;
+  requests_per_min: number;
+  uptime_pct?: number;
 };
 
 type MetricSample = {
@@ -30,11 +33,36 @@ type Incident = {
     confidence: number;
     proposed_fix: string;
     source: string;
+    confidence_breakdown?: {
+      evidence_match: string;
+      evidence_match_n: number;
+      evidence_total: number;
+      metric_severity_x: number;
+      log_signal_n: number;
+      log_lines_reviewed: number;
+    };
+    input?: {
+      metric: string;
+      value: number;
+      threshold: number;
+      log_lines_reviewed: number;
+      metrics_samples_reviewed: number;
+      window: string;
+    };
   } | null;
   guardian: { decision: string; can_approve: boolean; reason: string } | null;
   approved_by: string | null;
   resolved_at: string | null;
   resolution: string | null;
+  timeline?: { stage: string; ts: string; detail: string }[];
+  detection?: {
+    metric: string;
+    value: number;
+    threshold: number;
+    window_samples: number;
+    window_label: string;
+    breach_seconds: number;
+  };
 };
 
 type AuditEntry = {
@@ -43,6 +71,13 @@ type AuditEntry = {
   actor: string;
   action: string;
   detail: string;
+};
+
+type LogEntry = {
+  ts: string;
+  service: string;
+  level: string;
+  message: string;
 };
 
 const API = "";
@@ -128,25 +163,140 @@ function Sparkline({ samples }: { samples: MetricSample[] }) {
   );
 }
 
+/** Percentile of a sorted numeric list (linear interpolation-free, nearest-rank). */
+function percentile(sorted: number[], p: number) {
+  if (sorted.length === 0) return null;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[idx];
+}
+
+/** Expanded detail view for one service — all numbers from its real /metrics samples and /health. */
+function ServiceDetail({
+  service,
+  samples,
+  onClose,
+}: {
+  service: Service | undefined;
+  samples: MetricSample[];
+  onClose: () => void;
+}) {
+  if (!service) return null;
+  const latencies = samples.map((s) => s.latency_ms).sort((a, b) => a - b);
+  const p50 = percentile(latencies, 50);
+  const p95 = percentile(latencies, 95);
+  const p99 = percentile(latencies, 99);
+  // Error budget: share of recent samples inside both SLOs
+  // (latency <= 500ms AND error rate <= 20%).
+  const inSlo = samples.filter((s) => s.latency_ms <= 500 && s.error_rate <= 0.2).length;
+  const budgetPct = samples.length === 0 ? null : (inSlo / samples.length) * 100;
+  const last10 = samples.slice(-10).reverse();
+
+  return (
+    <section className="card detail">
+      <div className="detail-head">
+        <h2>
+          {service.name} — detail
+          <span className="muted small">
+            {" "}
+            · from {samples.length} recent samples · uptime since demo start
+          </span>
+        </h2>
+        <button className="ghost" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="detail-grid">
+        <div className="stat">
+          <span className="stat-value">{p50 === null ? "—" : `${p50}ms`}</span>
+          <span className="stat-label">p50 latency</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{p95 === null ? "—" : `${p95}ms`}</span>
+          <span className="stat-label">p95 latency (SLO 500ms)</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{p99 === null ? "—" : `${p99}ms`}</span>
+          <span className="stat-label">p99 latency</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">
+            {budgetPct === null ? "—" : `${budgetPct.toFixed(0)}%`}
+          </span>
+          <span className="stat-label">
+            error budget remaining ({inSlo}/{samples.length} samples inside SLO)
+          </span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">
+            {service.uptime_pct === undefined ? "—" : `${service.uptime_pct.toFixed(1)}%`}
+          </span>
+          <span className="stat-label">uptime since demo started</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{service.total_requests.toLocaleString("en-US")}</span>
+          <span className="stat-label">total requests · {(service.requests_per_min ?? 0).toLocaleString("en-US")}/min</span>
+        </div>
+      </div>
+      <h3 className="detail-sub">Last 10 samples</h3>
+      {last10.length === 0 && <p className="muted">No samples yet.</p>}
+      {last10.length > 0 && (
+        <table className="history">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Latency</th>
+              <th>Error rate</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {last10.map((s) => (
+              <tr key={s.ts}>
+                <td>{fmtTime(s.ts)}</td>
+                <td>{s.latency_ms}ms</td>
+                <td>{Math.round(s.error_rate * 100)}%</td>
+                <td>
+                  <span className={`badge ${s.status}`}>{s.status}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [services, setServices] = useState<Service[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [metrics, setMetrics] = useState<Record<string, MetricSample[]>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastPoll, setLastPoll] = useState<Date | null>(null);
+  const [chaosMode, setChaosMode] = useState(false);
+  const [guidedHint, setGuidedHint] = useState(false);
+  const [selectedService, setSelectedService] = useState<string | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  // Refs so the chaos interval always sees the latest state without
+  // re-creating the timer on every poll.
+  const servicesRef = useRef<Service[]>([]);
+  const activeRef = useRef<Incident | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     try {
-      const [h, i, a] = await Promise.all([
+      const [h, i, a, l] = await Promise.all([
         fetch(`${API}/health`).then((r) => r.json()),
         fetch(`${API}/incidents`).then((r) => r.json()),
         fetch(`${API}/audit`).then((r) => r.json()),
+        fetch(`${API}/logs?limit=30`).then((r) => r.json()),
       ]);
       setServices(h.services);
       setIncidents(i.incidents);
       setAudit(a.audit);
+      setLogs(l.logs);
       setError("");
       setLastPoll(new Date());
       // Latency history per service, for the sparklines.
@@ -168,15 +318,55 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 3000);
+    const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
   }, [refresh]);
 
+  // Keep the refs fresh for the chaos timer.
+  useEffect(() => {
+    servicesRef.current = services;
+  }, [services]);
+
   const openIncidents = incidents.filter((i) => OPEN_STATUSES.includes(i.status));
   const active = openIncidents[openIncidents.length - 1]; // newest open
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  // Guided demo hint clears itself once the incident shows up.
+  useEffect(() => {
+    if (active) setGuidedHint(false);
+  }, [active]);
+
+  // Log stream auto-scrolls to the newest line.
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs]);
+
+  // Chaos mode: every 75s inject one random fault — but only when the
+  // system is calm (no active incident, nothing broken). Toggling off
+  // stops the timer. It never approves anything.
+  useEffect(() => {
+    if (!chaosMode) return;
+    const id = setInterval(() => {
+      if (activeRef.current) return;
+      const svcs = servicesRef.current;
+      if (svcs.length === 0 || svcs.some((s) => s.broken)) return;
+      const svc = svcs[Math.floor(Math.random() * svcs.length)];
+      const type = Math.random() < 0.5 ? "latency" : "errors";
+      void doBreak(svc.name, type);
+    }, 75000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaosMode]);
+
   const past = [...incidents].reverse().filter((i) => !OPEN_STATUSES.includes(i.status));
   const resolved = incidents.filter((i) => i.status === "resolved");
   const healthyCount = services.filter((s) => s.status === "healthy").length;
+  const totalRequests = services.reduce((sum, s) => sum + (s.total_requests ?? 0), 0);
+  const totalReqMin = services.reduce((sum, s) => sum + (s.requests_per_min ?? 0), 0);
   const avgResolve =
     resolved.length === 0
       ? null
@@ -221,6 +411,7 @@ export default function App() {
   const doReset = async () => {
     if (!window.confirm("Reset the demo? This clears incidents, metrics and logs. The audit trail is kept.")) return;
     setBusy(true);
+    setGuidedHint(false);
     try {
       await post("/demo/reset", {});
       await refresh();
@@ -229,6 +420,13 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Guided demo: break inventory (latency) and tell the viewer what to
+   * watch for. It never approves anything — the human still approves. */
+  const runGuidedDemo = async () => {
+    setGuidedHint(true);
+    await doBreak("inventory", "latency");
   };
 
   const approve = async () => {
@@ -279,11 +477,34 @@ export default function App() {
             {lastPoll ? ` · ${lastPoll.toLocaleTimeString()}` : ""}
           </span>
           <span className="pill">investigator: {invSource}</span>
+          <button disabled={busy} onClick={runGuidedDemo}>
+            ▶ Run guided demo
+          </button>
+          <button
+            className={chaosMode ? "chaos-on" : "ghost"}
+            onClick={() => setChaosMode((v) => !v)}
+            aria-pressed={chaosMode}
+            title="When on, injects one random fault every ~75s, only while everything is calm. Never auto-approves."
+          >
+            Chaos mode: {chaosMode ? "On" : "Off"}
+          </button>
           <button className="ghost" disabled={busy} onClick={doReset}>
             Reset demo
           </button>
         </div>
       </header>
+      {guidedHint && (
+        <p className="guided-hint">
+          ▶ Watch: the incident appears in ~30s below, then read the cause and
+          approve the fix yourself. Nothing is auto-approved.
+        </p>
+      )}
+      {chaosMode && (
+        <p className="chaos-hint">
+          Chaos mode is on — a random fault will be injected every ~75s whenever
+          there is no active incident and nothing is broken.
+        </p>
+      )}
 
       {error && <p className="error">{error}</p>}
 
@@ -308,13 +529,37 @@ export default function App() {
           </span>
           <span className="stat-label">avg time to resolve</span>
         </div>
+        <div className="stat">
+          <span className="stat-value">{totalRequests.toLocaleString("en-US")}</span>
+          <span className="stat-label">total requests</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{totalReqMin.toLocaleString("en-US")}</span>
+          <span className="stat-label">requests / min</span>
+        </div>
       </div>
 
       <section className="card">
         <h2>Services</h2>
+        <p className="muted small chain">
+          Simulated dependency chain: <strong>orders → inventory → payments</strong>
+          {" "}· click a service for its detail view
+        </p>
         <div className="svc-grid">
           {services.map((s) => (
-            <div className={`svc ${s.status}`} key={s.name}>
+            <div
+              className={`svc ${s.status}${selectedService === s.name ? " selected" : ""}`}
+              key={s.name}
+              onClick={() => setSelectedService(selectedService === s.name ? null : s.name)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedService(selectedService === s.name ? null : s.name);
+                }
+              }}
+            >
               <div className="svc-head">
                 <strong>
                   <span className={`dot ${s.status}`} />
@@ -329,10 +574,13 @@ export default function App() {
                 <span>
                   <strong>{Math.round(s.error_rate * 100)}%</strong> errors
                 </span>
+                <span>
+                  <strong>{(s.requests_per_min ?? 0).toLocaleString("en-US")}</strong> req/min
+                </span>
                 {s.break_type && <span className="fault">fault: {s.break_type}</span>}
               </p>
               <Sparkline samples={metrics[s.name] ?? []} />
-              <div className="svc-actions">
+              <div className="svc-actions" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="danger"
                   disabled={busy || s.broken}
@@ -355,6 +603,34 @@ export default function App() {
                   Recover
                 </button>
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {selectedService && (
+        <ServiceDetail
+          service={services.find((s) => s.name === selectedService)}
+          samples={metrics[selectedService] ?? []}
+          onClose={() => setSelectedService(null)}
+        />
+      )}
+
+      <section className="card">
+        <h2>
+          Live log stream
+          <span className="muted small"> · newest at the bottom · updates every poll</span>
+        </h2>
+        {logs.length === 0 && (
+          <p className="muted">Waiting for log lines from the backend…</p>
+        )}
+        <div className="log-stream" ref={logRef}>
+          {[...logs].reverse().map((l, idx) => (
+            <div className={`log-line log-${l.level.toLowerCase()}`} key={`${l.ts}-${idx}`}>
+              <span className="log-time">{fmtTime(l.ts)}</span>
+              <span className="log-service">{l.service}</span>
+              <span className={`log-level log-level-${l.level.toLowerCase()}`}>{l.level}</span>
+              <span className="log-msg">{l.message}</span>
             </div>
           ))}
         </div>
@@ -385,6 +661,33 @@ export default function App() {
             </p>
             {active.investigation ? (
               <>
+                {/* Detection snapshot — what the detector saw, from real data. */}
+                {active.detection && (
+                  <div className="dossier-box">
+                    <h3>Detection snapshot</h3>
+                    <div className="kv">
+                      <span>
+                        Metric: <strong>{active.detection.metric}</strong>
+                      </span>
+                      <span>
+                        Value: <strong>{active.detection.value}</strong>
+                      </span>
+                      <span>
+                        Threshold / SLO: <strong>{active.detection.threshold}</strong>
+                      </span>
+                      <span>
+                        Breach before detection:{" "}
+                        <strong>{active.detection.breach_seconds}s</strong>
+                      </span>
+                      <span>
+                        Detector window: <strong>{active.detection.window_label}</strong>
+                      </span>
+                      <span>
+                        Samples in window: <strong>{active.detection.window_samples}</strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div className="confidence">
                   <div className="conf-head">
                     <span>
@@ -408,6 +711,73 @@ export default function App() {
                     <span>90 · human still approves</span>
                     <span>100</span>
                   </div>
+                  {active.investigation.confidence_breakdown && (
+                    <div className="breakdown">
+                      <h4>Why this score — computed from the data reviewed</h4>
+                      <div className="break-row">
+                        <span>
+                          Evidence match:{" "}
+                          <strong>
+                            {active.investigation.confidence_breakdown.evidence_match} real log
+                            lines
+                          </strong>
+                        </span>
+                        <span className="break-bar">
+                          <span
+                            style={{
+                              width: `${
+                                (active.investigation.confidence_breakdown.evidence_match_n /
+                                  Math.max(1, active.investigation.confidence_breakdown.evidence_total)) *
+                                100
+                              }%`,
+                            }}
+                          />
+                        </span>
+                      </div>
+                      <div className="break-row">
+                        <span>
+                          Metric severity:{" "}
+                          <strong>
+                            {active.investigation.confidence_breakdown.metric_severity_x}× the
+                            threshold
+                          </strong>
+                        </span>
+                        <span className="break-bar">
+                          <span
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (active.investigation.confidence_breakdown.metric_severity_x / 3) * 100,
+                              )}%`,
+                            }}
+                          />
+                        </span>
+                      </div>
+                      <div className="break-row">
+                        <span>
+                          Log signal:{" "}
+                          <strong>
+                            {active.investigation.confidence_breakdown.log_signal_n} ERROR/WARN
+                            lines in{" "}
+                            {active.investigation.confidence_breakdown.log_lines_reviewed}{" "}
+                            reviewed
+                          </strong>
+                        </span>
+                        <span className="break-bar">
+                          <span
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (active.investigation.confidence_breakdown.log_signal_n /
+                                  Math.max(1, active.investigation.confidence_breakdown.log_lines_reviewed)) *
+                                  100,
+                              )}%`,
+                            }}
+                          />
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <p>
                   <strong>Cause:</strong> {active.investigation.cause}
@@ -415,14 +785,83 @@ export default function App() {
                 <p>
                   <strong>Proposed fix:</strong> {active.investigation.proposed_fix}
                 </p>
-                <strong>Evidence (real log lines only):</strong>
-                <pre>{active.investigation.evidence.join("\n")}</pre>
+                <strong>Evidence (real log lines only, with timestamps):</strong>
+                <div className="evidence">
+                  {active.investigation.evidence.map((line, idx) => {
+                    const [ts, ...rest] = line.split(" ");
+                    return (
+                      <div className="evidence-line" key={idx}>
+                        <span className="log-time">{fmtTime(ts)}</span>
+                        <span className="log-msg">{rest.join(" ")}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {active.investigation.input && (
+                  <p className="muted small">
+                    Investigator was given: {active.investigation.input.metric} ={" "}
+                    {active.investigation.input.value} (threshold{" "}
+                    {active.investigation.input.threshold}) ·{" "}
+                    {active.investigation.input.log_lines_reviewed} log lines ·{" "}
+                    {active.investigation.input.metrics_samples_reviewed} metric samples ·{" "}
+                    {active.investigation.input.window} · source:{" "}
+                    {active.investigation.source}
+                  </p>
+                )}
+                <div className="dossier-box">
+                  <h3>Remediation plan</h3>
+                  <ol className="plan">
+                    <li>Restart the {active.service} service (the approved fix).</li>
+                    <li>Run the 10s health check — service must be healthy and latency under 200ms.</li>
+                    <li>Check {active.service} error logs for the original cause before reopening traffic.</li>
+                    <li>Reopen traffic. If still degraded, roll back the last deploy.</li>
+                  </ol>
+                  <p className="muted small">
+                    Risk: if approved, the restart either resolves the incident or is
+                    recorded as failed — nothing is hidden. If rejected, {active.service}{" "}
+                    stays degraded until someone recovers it manually, and the incident
+                    stays open.
+                  </p>
+                </div>
               </>
             ) : (
               <p className="muted">
                 <span className="pulse" /> Investigating — reading logs and
                 metrics…
               </p>
+            )}
+            {active.guardian && (
+              <p className="guardian">
+                <strong>Guardian:</strong> {active.guardian.decision} —{" "}
+                {active.guardian.reason}
+              </p>
+            )}
+            {(active.timeline?.length ?? 0) > 0 && (
+              <div className="dossier-box">
+                <h3>Incident timeline</h3>
+                <ol className="timeline">
+                  {active.timeline!.map((t, idx) => {
+                    const next = active.timeline![idx + 1];
+                    const dur = next
+                      ? (new Date(next.ts).getTime() - new Date(t.ts).getTime()) / 1000
+                      : (Date.now() - new Date(t.ts).getTime()) / 1000;
+                    return (
+                      <li key={idx}>
+                        <span className="tl-dot" />
+                        <span className="tl-time">{fmtTime(t.ts)}</span>
+                        <span className="tl-body">
+                          <strong>{t.stage}</strong>
+                          {t.detail ? <span className="muted"> — {t.detail}</span> : ""}
+                          <span className="muted small">
+                            {" "}
+                            · {next ? fmtDuration(dur) : `${fmtDuration(dur)} so far`}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
             )}
             {active.guardian && (
               <p className="guardian">

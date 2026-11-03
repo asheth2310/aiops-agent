@@ -11,6 +11,7 @@ from . import audit, simulator, store
 
 async def execute_fix(incident, approved_by):
     incident["status"] = "executing"
+    store.add_timeline(incident, "executing", "restarting service, 10s health check")
     audit.log(incident["id"], "executor", "fix_started",
               f"Restarting {incident['service']} (approved by {approved_by})")
     simulator.recover_service(incident["service"])
@@ -23,6 +24,10 @@ async def execute_fix(incident, approved_by):
     if svc["status"] == "healthy" and svc["latency_ms"] < 200:
         incident["status"] = "resolved"
         incident["resolution"] = "Service restarted, health check passing."
+        store.add_timeline(
+            incident, "resolved",
+            f"healthy after restart (latency {svc['latency_ms']}ms)",
+        )
         audit.log(incident["id"], "executor", "fix_succeeded",
                   f"{incident['service']} healthy after restart "
                   f"(latency {svc['latency_ms']}ms)")
@@ -32,5 +37,6 @@ async def execute_fix(incident, approved_by):
             f"Restart ran but {incident['service']} is still {svc['status']} "
             f"(latency {svc['latency_ms']}ms)."
         )
+        store.add_timeline(incident, "failed", incident["resolution"])
         audit.log(incident["id"], "executor", "fix_failed", incident["resolution"])
     return incident

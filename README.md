@@ -24,6 +24,19 @@ Demo: open the dashboard, click "Break" on a service (latency or
 errors), wait for the incident, read the cause + evidence, click
 Approve, watch it recover. "Reset demo" clears incidents, metrics and
 logs (the audit trail is kept) so you can run it again from clean.
+"Run guided demo" breaks inventory (latency) and walks you through the
+flow. "Chaos mode" injects one random fault every ~75s, only while
+everything is calm — it never approves anything.
+
+The dashboard stays alive even when healthy: it polls every 2s, the
+live log stream tails real backend log lines, and the stats strip shows
+total requests and requests/min ticking up. Click a service card for
+its detail view (p50/p95/p99, error budget, uptime, last 10 samples).
+The active incident is a full dossier: per-stage timeline with
+durations, detection snapshot (value vs threshold, breach length,
+detector window), confidence breakdown computed from the data reviewed,
+timestamped evidence, what the investigator was given, a 4-step
+remediation plan, and a risk note for approve vs reject.
 
 ## Governance policy (5 lines)
 
@@ -81,5 +94,5 @@ reset on restart. One failure type per demo run (latency or errors).
 - `backend/guardian.py` — confidence bands, approval rules
 - `backend/executor.py` — simulated restart, 10s health check
 - `backend/audit.py` + `backend/store.py` — audit trail, in-memory state, demo reset
-- `backend/main.py` — FastAPI app, endpoints (`/health`, `/metrics`, `/incidents`, `/audit`, `/demo/*`), serves the built dashboard
+- `backend/main.py` — FastAPI app, endpoints (`/health`, `/metrics`, `/logs`, `/incidents`, `/audit`, `/demo/*`), serves the built dashboard
 - `frontend/src/App.tsx` — dashboard: service cards with latency sparklines, active incident, history, audit timeline
