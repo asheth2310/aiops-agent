@@ -4,7 +4,7 @@ Live path (opt-in only):
 - Set GEMINI_LIVE=1 and the investigator calls the registered
   custom.gemini helper:
     python3 ~/workspace/custom-connectors/custom.gemini/bin/client.py
-      generate --model gemini-2.5-flash --prompt "..."
+      generate --model gemini-3.8-flash --prompt "..."
   That helper holds the stored credential; no API key ever appears in
   this code, in env vars, in files, or in logs.
 
@@ -22,9 +22,10 @@ Either way:
   to the mock and records source="mock-fallback".
 
 Live Gemini status (Nov 2, 2026): UNVERIFIED. The helper compiles, but
-live calls fail with HTTP 404 from generativelanguage.googleapis.com
-for gemini-2.5-flash and gemini-2.0-flash, with no pending approval.
-Do not claim live Gemini works until a run returns text.
+live calls fail against generativelanguage.googleapis.com: gemini-2.5-flash
+returns HTTP 404 ("no longer available to new users") and gemini-3.8-flash
+returns HTTP 503. With no pending approval. Do not claim live Gemini
+works until a run returns text.
 """
 import json
 import os
@@ -32,7 +33,7 @@ import re
 import subprocess
 import sys
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 HELPER = os.path.expanduser(
     "~/workspace/custom-connectors/custom.gemini/bin/client.py"
 )

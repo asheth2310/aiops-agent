@@ -118,6 +118,21 @@ def get_health():
     return simulator.health()
 
 
+@app.get("/metrics")
+def get_metrics(service: str = "inventory", limit: int = 60):
+    if service not in store.SERVICES:
+        raise HTTPException(status_code=404, detail=f"unknown service: {service}")
+    limit = max(1, min(int(limit), 120))
+    samples = list(store.METRICS[service])[-limit:]
+    return {"service": service, "samples": samples}
+
+
+@app.post("/demo/reset")
+def demo_reset():
+    store.reset()
+    return {"ok": True, "services": [svc["name"] for svc in store.SERVICES.values()]}
+
+
 @app.get("/incidents")
 def list_incidents():
     return {"incidents": list(reversed(store.INCIDENTS))}

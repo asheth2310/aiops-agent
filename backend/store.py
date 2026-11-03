@@ -26,6 +26,15 @@ SERVICES = {
         "break_type": None,
         "broken_since": None,
     },
+    "payments": {
+        "name": "payments",
+        "status": "healthy",
+        "latency_ms": 105,
+        "error_rate": 0.01,
+        "broken": False,
+        "break_type": None,
+        "broken_since": None,
+    },
 }
 
 # Last 200 samples per service: {ts, latency_ms, error_rate, status}
@@ -73,3 +82,24 @@ def open_incident(service_name):
         ):
             return inc
     return None
+
+
+def reset():
+    """Demo reset: recover all services, clear incidents, metrics and
+    logs. The audit trail is kept, and a 'demo reset' entry is appended
+    so the reset itself is visible in the trail."""
+    for name, svc in SERVICES.items():
+        svc["broken"] = False
+        svc["break_type"] = None
+        svc["broken_since"] = None
+        svc["status"] = "healthy"
+        svc["error_rate"] = 0.01
+        METRICS[name].clear()
+        LOGS[name].clear()
+    # Healthy starting latencies per service (match the simulator ranges).
+    SERVICES["orders"]["latency_ms"] = 82
+    SERVICES["inventory"]["latency_ms"] = 78
+    SERVICES["payments"]["latency_ms"] = 105
+    INCIDENTS.clear()
+    add_audit("—", "demo", "demo_reset",
+              "all services recovered; incidents, metrics and logs cleared")

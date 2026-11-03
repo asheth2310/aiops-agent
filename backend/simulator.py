@@ -1,19 +1,24 @@
-"""Simulated services: orders + inventory.
+"""Simulated services: orders + inventory + payments.
 
-These are fake services, not real order/inventory systems. Each tick
-(every 5s, driven by main.py) produces one latency/error sample and
-one or two log lines per service, so the detector and investigator
+These are fake services, not real order/inventory/payment systems. Each
+tick (every 5s, driven by main.py) produces one latency/error sample
+and one or two log lines per service, so the detector and investigator
 always have real data to work with — nothing is invented by the LLM.
 
 Break types:
-- "latency": inventory goes slow (800ms+) and error-prone (~35%)
-- "errors": inventory stays fast but fails ~35% of requests
+- "latency": service goes slow (800ms+) and error-prone (~35%)
+- "errors": service stays fast but fails ~35% of requests
 """
 import random
 
 from . import store
 
-HEALTHY_LATENCY = (60, 110)
+# Healthy latency range per service (ms); healthy error rate is 0-3% for all.
+HEALTHY_LATENCY = {
+    "orders": (60, 110),
+    "inventory": (60, 110),
+    "payments": (80, 140),
+}
 HEALTHY_ERROR = (0.0, 0.03)
 BROKEN_LATENCY = (800, 950)
 BROKEN_ERROR = (0.30, 0.45)
@@ -39,10 +44,10 @@ def tick():
             latency = random.randint(150, 220)
             error_rate = round(random.uniform(*BROKEN_ERROR), 2)
             status = "degraded"
-            _log(name, "ERROR", "request failed with HTTP 500 from inventory handler")
+            _log(name, "ERROR", f"request failed with HTTP 500 from {name} handler")
             _log(name, "WARN", f"error rate {int(error_rate * 100)}% exceeds 20% SLO")
         else:
-            latency = random.randint(*HEALTHY_LATENCY)
+            latency = random.randint(*HEALTHY_LATENCY[name])
             error_rate = round(random.uniform(*HEALTHY_ERROR), 2)
             status = "healthy"
             _log(name, "INFO", f"request ok in {latency}ms")
