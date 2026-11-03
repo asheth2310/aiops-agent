@@ -1,0 +1,13 @@
+# Render Blueprint: one free web service running the Dockerfile.
+# Dashboard + API on one URL (e.g. https://aiops-agent.onrender.com).
+# Free tier spins down after inactivity (first load ~50s) and in-memory
+# incidents/audit reset on restart — same as local runs.
+services:
+  - type: web
+    name: aiops-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: GEMINI_LIVE
+        value: "0"

@@ -9,10 +9,13 @@ Run:  uvicorn backend.main:app --reload --port 8000
 """
 import asyncio
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 load_dotenv()  # reads .env for GEMINI_LIVE / GEMINI_MODEL, if present.
@@ -30,6 +33,11 @@ app.add_middleware(
 )
 
 _sampling = False
+
+# Built frontend (frontend/dist), served by this same process when present,
+# so the hosted demo is one URL: dashboard + API on the same origin.
+# Local dev without a build keeps the JSON root and the Vite proxy.
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 
 class BreakRequest(BaseModel):
@@ -97,6 +105,11 @@ async def startup():
 
 @app.get("/")
 def root():
+    # Hosted mode: serve the built dashboard at / when frontend/dist exists.
+    # Local dev (no dist): keep the JSON root.
+    index = _DIST / "index.html"
+    if index.exists():
+        return FileResponse(index)
     return {"service": "Governed AIOps Agent (MVP)", "docs": "/docs"}
 
 
@@ -171,3 +184,7 @@ def reject_incident(incident_id: str, req: RejectRequest):
     incident["resolution"] = req.reason or "Rejected by human reviewer."
     audit.log(incident["id"], req.rejected_by, "rejected", incident["resolution"])
     return incident
+
+
+if (_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
