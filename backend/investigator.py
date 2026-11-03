@@ -4,9 +4,12 @@ Live path (opt-in only):
 - Set GEMINI_LIVE=1 and the investigator calls the registered
   custom.gemini helper:
     python3 ~/workspace/custom-connectors/custom.gemini/bin/client.py
-      generate --model gemini-3.8-flash --prompt "..."
+      generate --model <model> --prompt "..."
   That helper holds the stored credential; no API key ever appears in
   this code, in env vars, in files, or in logs.
+- Models are tried in order (GEMINI_MODEL first, then the fallbacks):
+  gemini-3.5-flash-lite, gemini-3.1-flash-lite. One attempt per model
+  (~15s timeout), then one retry of the first model.
 
 Default (GEMINI_LIVE unset / not "1"):
 - Deterministic mock. The demo works with no key and no network call.
@@ -21,11 +24,30 @@ Either way:
 - A failed / timed-out live call never breaks the demo: it falls back
   to the mock and records source="mock-fallback".
 
-Live Gemini status (Nov 2, 2026): UNVERIFIED. The helper compiles, but
-live calls fail against generativelanguage.googleapis.com: gemini-2.5-flash
-returns HTTP 404 ("no longer available to new users") and gemini-3.8-flash
-returns HTTP 503. With no pending approval. Do not claim live Gemini
-works until a run returns text.
+Live Gemini status (Nov 2, 2026, verified by direct generate calls):
+- WORKING via the stored key: gemini-3.5-flash (replied "OK live",
+  twice, and completed a full live investigation end to end) and
+  gemini-3.5-flash-lite (replied "OK live"); gemma-4-26b-a4b-it also
+  answered but is verbose, so it is not in the try list.
+- FAILING via the stored key: gemini-3.8-flash -> HTTP 503 Service
+  Unavailable (3 times), gemini-flash-latest -> HTTP 503,
+  gemini-2.5-flash -> HTTP 404, gemini-2.5-flash-lite -> HTTP 404,
+  gemini-2.0-flash -> HTTP 404, gemini-2.0-flash-lite -> HTTP 404.
+  The API's model list confirms all of these names exist — the
+  404s/503s are availability, not typos.
+- NOTE: gemini-3.8-flash ANSWERED in Google AI Studio for the same
+  account ("Hello, how can I help you today?"), so the model works —
+  the stored API key/project was the suspect for the 503s, not the
+  model. A fresh key was submitted via Secure Vault and retested:
+  gemini-3.5-flash-lite WORKS with the new key (replied "OK live" in
+  ~1-4s) and gemini-3.1-flash-lite WORKS too ("OK live" in 11s, after
+  one transient hang past 45s on the first attempt), so the default
+  model is now gemini-3.5-flash-lite with fallback
+  gemini-3.1-flash-lite. Still failing with the new key: gemini-3.8-flash
+  hangs / times out at 60s, gemini-2.5-flash, gemini-2.5-flash-lite and
+  gemini-2.5-pro all return HTTP 404.
+- On Render the helper binary does not exist, so live calls fail fast
+  (OSError) and the demo falls back to the mock there.
 """
 import json
 import os
@@ -33,7 +55,9 @@ import re
 import subprocess
 import sys
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# Fallback models, tried in order after GEMINI_MODEL (deduped at call time).
+GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
 HELPER = os.path.expanduser(
     "~/workspace/custom-connectors/custom.gemini/bin/client.py"
 )
@@ -84,13 +108,13 @@ def _evidence_is_real(evidence, logs):
     return True
 
 
-def _call_gemini_helper(prompt):
+def _call_gemini_helper(prompt, model):
     """One live call via the custom.gemini helper. Returns text or None."""
     try:
         proc = subprocess.run(
             [sys.executable, HELPER, "generate",
-             "--model", GEMINI_MODEL, "--prompt", prompt],
-            capture_output=True, text=True, timeout=75,
+             "--model", model, "--prompt", prompt],
+            capture_output=True, text=True, timeout=15,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
@@ -101,6 +125,26 @@ def _call_gemini_helper(prompt):
         return data.get("text") or None
     except ValueError:
         return None
+
+
+def _try_live_models(prompt, logs):
+    """Try the model list in order, then one retry of the first model.
+
+    Returns a parsed result dict, or None if every attempt failed or
+    produced unusable / hallucinated output.
+    """
+    models = []
+    for m in [GEMINI_MODEL, *GEMINI_FALLBACK_MODELS]:
+        if m and m not in models:
+            models.append(m)
+    attempts = models + [models[0]]  # one retry of the first model
+    for model in attempts:
+        text = _call_gemini_helper(prompt, model)
+        parsed = _parse_result(text, logs)
+        if parsed:
+            parsed["model"] = model
+            return parsed
+    return None
 
 
 def _parse_result(text, logs):
@@ -167,13 +211,7 @@ def investigate(incident, logs, recent_metrics):
     if os.environ.get("GEMINI_LIVE", "0") != "1":
         result = _mock_result(incident, logs)
     else:
-        result = None
-        for _attempt in range(2):  # first try + one retry on bad / hallucinated output
-            text = _call_gemini_helper(prompt)
-            parsed = _parse_result(text, logs)
-            if parsed:
-                result = parsed
-                break
+        result = _try_live_models(prompt, logs)
         if result is None:
             result = _mock_result(incident, logs)
             result["source"] = "mock-fallback"

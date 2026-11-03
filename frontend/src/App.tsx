@@ -80,6 +80,39 @@ type LogEntry = {
   message: string;
 };
 
+type EvalRun = {
+  service: string;
+  break_type: string;
+  detected: boolean;
+  detect_seconds: number | null;
+  metric: string | null;
+  cause_correct: boolean;
+  confidence: number | null;
+  source: string | null;
+  evidence_valid: boolean;
+  guardian: string | null;
+  resolve_seconds: number | null;
+  final_status: string | null;
+};
+
+type EvalData = {
+  generated_at?: string;
+  baseline_seconds?: number;
+  runs: EvalRun[];
+  summary: {
+    runs: number;
+    detected: number;
+    cause_correct: number;
+    evidence_valid: number;
+    avg_detect_seconds: number | null;
+    median_detect_seconds: number | null;
+    avg_resolve_seconds: number | null;
+    false_positives: number;
+    investigator_source: string | null;
+  } | null;
+  note?: string;
+};
+
 const API = "";
 const OPEN_STATUSES = [
   "detected",
@@ -279,6 +312,7 @@ export default function App() {
   const [chaosMode, setChaosMode] = useState(false);
   const [guidedHint, setGuidedHint] = useState(false);
   const [selectedService, setSelectedService] = useState<string | null>(null);
+  const [evalData, setEvalData] = useState<EvalData | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   // Refs so the chaos interval always sees the latest state without
   // re-creating the timer on every poll.
@@ -321,6 +355,15 @@ export default function App() {
     const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  // Evaluation results are a recorded artifact, not live state — fetch
+  // once on load, not on every poll.
+  useEffect(() => {
+    fetch(`${API}/eval`)
+      .then((r) => r.json())
+      .then((d) => setEvalData(d))
+      .catch(() => setEvalData(null));
+  }, []);
 
   // Keep the refs fresh for the chaos timer.
   useEffect(() => {
@@ -928,6 +971,95 @@ export default function App() {
               ))}
             </tbody>
           </table>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Evaluation</h2>
+        {!evalData?.summary && (
+          <p className="muted">
+            No eval run yet — run <code>backend/eval/run_eval.py</code>. It
+            starts the app, checks a 30s healthy baseline for false
+            positives, then injects 6 faults (3 services × latency/errors)
+            and measures detection, cause accuracy, evidence validity and
+            resolution.
+          </p>
+        )}
+        {evalData?.summary && (
+          <>
+            <div className="stats">
+              <div className="stat">
+                <span className="stat-num">
+                  {evalData.summary.detected}/{evalData.summary.runs}
+                </span>
+                <span className="stat-label">faults detected</span>
+              </div>
+              <div className="stat">
+                <span className="stat-num">
+                  {evalData.summary.cause_correct}/{evalData.summary.runs}
+                </span>
+                <span className="stat-label">cause correct</span>
+              </div>
+              <div className="stat">
+                <span className="stat-num">
+                  {evalData.summary.evidence_valid}/{evalData.summary.runs}
+                </span>
+                <span className="stat-label">evidence valid</span>
+              </div>
+              <div className="stat">
+                <span className="stat-num">
+                  {evalData.summary.avg_detect_seconds ?? "—"}s
+                </span>
+                <span className="stat-label">
+                  avg detect (median {evalData.summary.median_detect_seconds ?? "—"}s)
+                </span>
+              </div>
+              <div className="stat">
+                <span className="stat-num">
+                  {evalData.summary.avg_resolve_seconds ?? "—"}s
+                </span>
+                <span className="stat-label">avg resolve</span>
+              </div>
+              <div className="stat">
+                <span className="stat-num">{evalData.summary.false_positives}</span>
+                <span className="stat-label">
+                  false positives ({evalData.baseline_seconds ?? 30}s baseline)
+                </span>
+              </div>
+            </div>
+            <p className="muted small">
+              Investigator: {evalData.summary.investigator_source ?? "—"}
+              {evalData.generated_at ? ` · run ${fmtTime(evalData.generated_at)}` : ""}
+            </p>
+            <table className="history">
+              <thead>
+                <tr>
+                  <th>Service</th>
+                  <th>Fault</th>
+                  <th>Detect</th>
+                  <th>Cause</th>
+                  <th>Evidence</th>
+                  <th>Conf.</th>
+                  <th>Resolve</th>
+                  <th>Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evalData.runs.map((r, idx) => (
+                  <tr key={idx}>
+                    <td>{r.service}</td>
+                    <td>{r.break_type}</td>
+                    <td>{r.detect_seconds != null ? `${r.detect_seconds}s` : "—"}</td>
+                    <td>{r.cause_correct ? "✓" : "✗"}</td>
+                    <td>{r.evidence_valid ? "✓" : "✗"}</td>
+                    <td>{r.confidence != null ? `${r.confidence}%` : "—"}</td>
+                    <td>{r.resolve_seconds != null ? `${r.resolve_seconds}s` : "—"}</td>
+                    <td>{r.final_status ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </section>
 

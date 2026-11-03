@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-11-03T01:37:13Z",
+  "baseline_seconds": 30,
+  "runs": [
+    {
+      "service": "inventory",
+      "break_type": "latency",
+      "detected": true,
+      "detect_seconds": 36.0,
+      "metric": "error_rate",
+      "cause_correct": true,
+      "confidence": 82,
+      "source": "mock",
+      "evidence_valid": true,
+      "guardian": "needs_approval",
+      "resolve_seconds": 10.0,
+      "final_status": "resolved"
+    },
+    {
+      "service": "inventory",
+      "break_type": "errors",
+      "detected": true,
+      "detect_seconds": 58.1,
+      "metric": "error_rate",
+      "cause_correct": true,
+      "confidence": 82,
+      "source": "mock",
+      "evidence_valid": true,
+      "guardian": "needs_approval",
+      "resolve_seconds": 10.0,
+      "final_status": "resolved"
+    },
+    {
+      "service": "orders",
+      "break_type": "latency",
+      "detected": true,
+      "detect_seconds": 58.1,
+      "metric": "error_rate",
+      "cause_correct": true,
+      "confidence": 82,
+      "source": "mock",
+      "evidence_valid": true,
+      "guardian": "needs_approval",
+      "resolve_seconds": 10.0,
+      "final_status": "resolved"
+    },
+    {
+      "service": "orders",
+      "break_type": "errors",
+      "detected": true,
+      "detect_seconds": 58.1,
+      "metric": "error_rate",
+      "cause_correct": true,
+      "confidence": 82,
+      "source": "mock",
+      "evidence_valid": true,
+      "guardian": "needs_approval",
+      "resolve_seconds": 10.0,
+      "final_status": "resolved"
+    },
+    {
+      "service": "payments",
+      "break_type": "latency",
+      "detected": true,
+      "detect_seconds": 58.1,
+      "metric": "error_rate",
+      "cause_correct": true,
+      "confidence": 82,
+      "source": "mock",
+      "evidence_valid": true,
+      "guardian": "needs_approval",
+      "resolve_seconds": 10.0,
+      "final_status": "resolved"
+    },
+    {
+      "service": "payments",
+      "break_type": "errors",
+      "detected": true,
+      "detect_seconds": 58.1,
+      "metric": "error_rate",
+      "cause_correct": true,
+      "confidence": 82,
+      "source": "mock",
+      "evidence_valid": true,
+      "guardian": "needs_approval",
+      "resolve_seconds": 10.0,
+      "final_status": "resolved"
+    }
+  ],
+  "summary": {
+    "runs": 6,
+    "detected": 6,
+    "cause_correct": 6,
+    "evidence_valid": 6,
+    "avg_detect_seconds": 54.4,
+    "median_detect_seconds": 58.1,
+    "avg_resolve_seconds": 10.0,
+    "false_positives": 0,
+    "investigator_source": "mock"
+  }
+}

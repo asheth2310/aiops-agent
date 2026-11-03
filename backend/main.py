@@ -8,6 +8,7 @@ No step after detection runs without a human in the MVP.
 Run:  uvicorn backend.main:app --reload --port 8000
 """
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -182,6 +183,15 @@ def get_incident(incident_id: str):
         if inc["id"] == incident_id:
             return inc
     raise HTTPException(status_code=404, detail="incident not found")
+
+
+@app.get("/eval")
+def get_eval():
+    """Latest evaluation-harness results, if a run has been recorded."""
+    results_file = Path(__file__).resolve().parent / "eval" / "results.json"
+    if not results_file.exists():
+        return {"runs": [], "summary": None, "note": "no eval run yet"}
+    return json.loads(results_file.read_text())
 
 
 @app.get("/audit")
