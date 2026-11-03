@@ -206,6 +206,12 @@ function Sparkline({ samples }: { samples: MetricSample[] }) {
       role="img"
       aria-label="Latency over the last samples"
     >
+      <defs>
+        <linearGradient id="spark-grad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#8b5cf6" />
+          <stop offset="100%" stopColor="#22d3ee" />
+        </linearGradient>
+      </defs>
       <line
         x1="0"
         x2={W}
@@ -216,7 +222,7 @@ function Sparkline({ samples }: { samples: MetricSample[] }) {
       <text x={W - 2} y={thresholdY - 3} textAnchor="end" className="threshold-label">
         500ms
       </text>
-      <polyline points={pts} className="spark-line" />
+      <polyline points={pts} className="spark-line" pathLength={1000} />
       <circle
         cx={x(samples.length - 1)}
         cy={y(samples[samples.length - 1].latency_ms)}
@@ -539,7 +545,10 @@ export default function App() {
     <div className="wrap">
       <header className="header">
         <div>
-          <h1>Governed AIOps Agent</h1>
+          <p className="eyebrow">Governed AIOps · Human-in-the-loop</p>
+          <h1>
+            Governed <span className="grad-text">AIOps</span> Agent
+          </h1>
           <p className="sub">
             The agent watches orders, inventory and payments, explains
             every incident with evidence, and never fixes anything
@@ -649,6 +658,7 @@ export default function App() {
       </div>
 
       <section className="card">
+        <p className="kicker">Telemetry</p>
         <h2>Services</h2>
         <p className="muted small chain">
           Simulated dependency chain: <strong>orders → inventory → payments</strong>
@@ -726,6 +736,7 @@ export default function App() {
       )}
 
       <section className="card">
+        <p className="kicker">Stream</p>
         <h2>
           Live log stream
           <span className="muted small"> · newest at the bottom · updates every poll</span>
@@ -745,7 +756,8 @@ export default function App() {
         </div>
       </section>
 
-      <section className="card">
+      <section className={active ? "card incident-active" : "card"}>
+        <p className="kicker">Incident</p>
         <h2>
           Active incident
           {openIncidents.length > 1 && (
@@ -1014,6 +1026,7 @@ export default function App() {
       </section>
 
       <section className="card">
+        <p className="kicker">History</p>
         <h2>Incident history</h2>
         {past.length === 0 && (
           <p className="muted">No finished incidents yet — resolved and rejected ones show up here.</p>
@@ -1051,6 +1064,7 @@ export default function App() {
       </section>
 
       <section className="card">
+        <p className="kicker">Measured</p>
         <h2>Evaluation</h2>
         {!evalData?.summary && (
           <p className="muted">
@@ -1140,6 +1154,7 @@ export default function App() {
       </section>
 
       <section className="card">
+        <p className="kicker">Ledger</p>
         <h2>Audit trail</h2>
         {audit.length === 0 && <p className="muted">No audit events yet.</p>}
         <ol className="timeline">
