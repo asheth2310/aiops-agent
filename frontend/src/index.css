@@ -1,0 +1,19 @@
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+.sub { color: #94a3b8; margin: 0 0 20px; }
+.card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.svc { flex: 1; min-width: 200px; background: #0f172a; border-radius: 8px; padding: 12px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.dot.healthy { background: #22c55e; }
+.dot.degraded { background: #ef4444; }
+button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; margin-right: 8px; }
+button:disabled { background: #475569; cursor: not-allowed; }
+button.danger { background: #dc2626; }
+button.ghost { background: #334155; }
+pre { background: #0f172a; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+.audit { font-size: 13px; }
+.audit li { margin-bottom: 6px; }
+.muted { color: #94a3b8; }
+.badge { display: inline-block; background: #334155; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin-left: 8px; }
