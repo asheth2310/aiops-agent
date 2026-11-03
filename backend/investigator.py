@@ -1,15 +1,22 @@
 """Investigator — the only LLM part. One Gemini call per incident.
 
-Live path (opt-in only):
-- Set GEMINI_LIVE=1 and the investigator calls the registered
-  custom.gemini helper:
+Live path (opt-in only, GEMINI_LIVE=1):
+- First, a direct REST call, when GEMINI_API_KEY is set (env var only —
+  on Render you set it in the dashboard, never in a file):
+    POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+    header x-goog-api-key: <key from env>
+  This is how the hosted demo can run live Gemini: Render has no
+  helper binary and no stored credential, so the REST path is the
+  only live path there. The key value is never read from a file, never
+  printed, and never logged — it is only sent in the request header.
+- Then, the local helper path (stored custom.gemini credential):
     python3 ~/workspace/custom-connectors/custom.gemini/bin/client.py
       generate --model <model> --prompt "..."
-  That helper holds the stored credential; no API key ever appears in
-  this code, in env vars, in files, or in logs.
+  No API key ever appears in this code, in env vars, in files, or in
+  logs for this path either.
 - Models are tried in order (GEMINI_MODEL first, then the fallbacks):
   gemini-3.5-flash-lite, gemini-3.1-flash-lite. One attempt per model
-  (~15s timeout), then one retry of the first model.
+  (~15s timeout), then one retry of the first model via the helper.
 
 Default (GEMINI_LIVE unset / not "1"):
 - Deterministic mock. The demo works with no key and no network call.
@@ -47,13 +54,18 @@ Live Gemini status (Nov 2, 2026, verified by direct generate calls):
   hangs / times out at 60s, gemini-2.5-flash, gemini-2.5-flash-lite and
   gemini-2.5-pro all return HTTP 404.
 - On Render the helper binary does not exist, so live calls fail fast
-  (OSError) and the demo falls back to the mock there.
+  (OSError) and the demo falls back to the mock there — unless
+  GEMINI_API_KEY is set in the Render dashboard, in which case the
+  direct REST path above runs live Gemini on the hosted demo too.
 """
 import json
 import os
 import re
 import subprocess
 import sys
+import urllib.request
+
+from . import rag
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # Fallback models, tried in order after GEMINI_MODEL (deduped at call time).
@@ -127,8 +139,50 @@ def _call_gemini_helper(prompt, model):
         return None
 
 
+def _call_gemini_rest(prompt, model, api_key):
+    """One live call via the Gemini REST API directly (stdlib only).
+
+    Used when GEMINI_API_KEY is set — this is the path that works on
+    Render, where the local helper binary does not exist. The key is
+    only ever sent in the x-goog-api-key request header; it is never
+    logged, stored, or included in any returned data. Returns the
+    model's text, or None on any failure (HTTP error, timeout, bad
+    JSON, unexpected shape).
+    """
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent"
+    )
+    body = json.dumps(
+        {"contents": [{"parts": [{"text": prompt}]}]}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
 def _try_live_models(prompt, logs):
     """Try the model list in order, then one retry of the first model.
+
+    Order of attempts:
+      (a) direct REST with GEMINI_API_KEY, if set (works on Render);
+      (b) the local helper path (stored credential);
+    then the caller falls back to the deterministic mock.
 
     Returns a parsed result dict, or None if every attempt failed or
     produced unusable / hallucinated output.
@@ -137,6 +191,14 @@ def _try_live_models(prompt, logs):
     for m in [GEMINI_MODEL, *GEMINI_FALLBACK_MODELS]:
         if m and m not in models:
             models.append(m)
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if api_key:
+        for model in models:
+            text = _call_gemini_rest(prompt, model, api_key)
+            parsed = _parse_result(text, logs)
+            if parsed:
+                parsed["model"] = model
+                return parsed
     attempts = models + [models[0]]  # one retry of the first model
     for model in attempts:
         text = _call_gemini_helper(prompt, model)
@@ -207,6 +269,15 @@ def investigate(incident, logs, recent_metrics):
         f"(threshold {incident['threshold']})\n\n"
         f"Recent metrics:\n{metrics_text}\n\nLog lines:\n{logs_text}"
     )
+
+    # RAG: runbook context is advisory only. It is appended to the prompt
+    # AFTER the real logs, and the evidence guard still requires every
+    # quoted evidence line to appear verbatim in the log lines we sent —
+    # a runbook sentence can never pass as evidence, because runbook
+    # text is not in the logs.
+    context = rag.get_context(incident)
+    if context:
+        prompt = prompt + "\n\n" + context
 
     if os.environ.get("GEMINI_LIVE", "0") != "1":
         result = _mock_result(incident, logs)

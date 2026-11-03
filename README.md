@@ -38,6 +38,34 @@ detector window), confidence breakdown computed from the data reviewed,
 timestamped evidence, what the investigator was given, a 4-step
 remediation plan, and a risk note for approve vs reject.
 
+## Showcase / demo in 2 minutes
+
+The one line to open with: the agent watches 3 services, explains
+every incident with evidence, and never fixes anything without a human
+approving. The dashboard shows that pipeline as a strip under the
+header — Detector → Investigator → Guardian → Human approval →
+Executor — with the current step highlighted while an incident is open,
+and the incident card shows a green **✦ Live Gemini** badge when the
+explanation came from real Gemini (amber **Mock** badge otherwise).
+
+1. **0:00** — Open the dashboard. Point at the pipeline strip and the
+   three healthy services with their live sparklines.
+2. **0:20** — Click **▶ Run guided demo**. It breaks inventory
+   (latency). While the detector's 1-minute window fills (~30–60s),
+   talk through the governance rules below.
+3. **1:00** — The incident appears: detection snapshot, cause,
+   evidence (real log lines only), confidence with its breakdown, and
+   the Guardian's decision. Point at the source badge.
+4. **1:30** — Click **Approve fix**. The executor restarts the service
+   and the 10s health check resolves the incident; the audit trail
+   shows detector → investigator → guardian → human → executor.
+5. **1:50** — **Reset demo** to run it again, or flip **Chaos mode**
+   on to keep faults coming while you answer questions.
+
+Run it locally with `GEMINI_LIVE=1` for the live-Gemini demo (see
+below); the public link shows live Gemini too, once the key is set in
+the Render dashboard.
+
 ## Governance policy (5 lines)
 
 1. Detection is hard thresholds only — no LLM decides an incident exists.
@@ -52,6 +80,17 @@ One Render web service (free tier) runs the Dockerfile: it builds the
 React dashboard, then FastAPI serves the dashboard + API on one URL.
 `render.yaml` is the Blueprint for it. Free tier spins down after
 inactivity (first load ~50s) and in-memory state resets on restart.
+
+## Live on Render
+
+`render.yaml` sets `GEMINI_LIVE=1` and declares `GEMINI_API_KEY` with
+`sync: false`, so Render prompts for the key in the dashboard
+(**Environment** tab) and it is never stored in the repo. Once the key
+is set, the hosted demo calls Gemini directly (REST) and the incident
+card shows the green **✦ Live Gemini** badge. With no key set, the
+hosted demo still works exactly the same — the investigator falls back
+to the deterministic mock and the badge says **Mock**. Redeploy is
+automatic after the key is saved (Render restarts the service).
 
 | Run | Fault | Time to detect | Confidence | Cause correct? | Time to recover* |
 |-----|-------|----------------|------------|----------------|------------------|
@@ -91,26 +130,54 @@ guardian, resolve, outcome) are in `results.json`.
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest backend/tests -q   # 25 tests, backend only
+.venv/bin/python -m pytest backend/tests -q   # 43 tests + 1 skipped (real-DB test needs TEST_DATABASE_URL), backend only
 ```
+
+## Persistence + RAG
+
+- **Persistence (optional):** set `DATABASE_URL` to a Postgres
+  connection string (Render dashboard > Environment, or Supabase)
+  and incidents + the audit trail survive restarts. Tables are
+  created automatically on startup; if the database is unreachable
+  the app logs a warning and keeps running in memory. Unset =
+  in-memory, exactly as before. Details in
+  `docs/persistence-rag.md`.
+- **RAG over runbooks:** before the investigator answers, it reads
+  the matching runbook (`backend/runbooks/`: latency spike,
+  error-rate spike, DB query timeouts, payments degradation) and up
+  to 3 similar past incidents. Runbook text is advisory only — the
+  evidence guard still requires every quoted evidence line to be a
+  real log line, so a runbook sentence can never pass as evidence.
 
 Tests cover the detector (error rule, latency rule needs two windows,
 no refire after recovery, no second incident while one is open), the
 guardian (confidence bands, never auto-fixes), the investigator
 (evidence guard rejects invented lines, mock quotes real lines only),
-and the API (`/health`, `/metrics`, `/logs`, `/eval`, `/demo/reset`).
+and the API (`/health`, `/metrics`, `/logs`, `/eval`, `/demo/reset`),
+plus the direct Gemini REST path (mocked HTTP: key header + model
+URL, fallback-model retry, hallucinated-evidence rejection, mock
+fallback with no key and no helper).
 CI (`.github/workflows/ci.yml`) runs the backend tests and the
 frontend build on every push/PR to main.
 
 ## Gemini — live status: VERIFIED WORKING (mock is still the default)
 
-Live Gemini goes through the stored `custom.gemini` credential via its
-helper (`~/workspace/custom-connectors/custom.gemini/bin/client.py`),
-never a raw key in code, env, or files. Set `GEMINI_LIVE=1` in `.env`
-to try live calls per incident. The investigator tries the models in
-order — `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite` — one attempt
-each (~15s timeout), then one retry of the first model, and falls back
-to the mock on any failure. `GEMINI_MODEL` overrides the first model.
+Live Gemini reaches the investigator two ways, in this order
+(`GEMINI_LIVE=1`):
+1. **Direct REST** — when `GEMINI_API_KEY` is set (env var, or the
+   Render dashboard's Environment tab), the backend calls
+   `POST .../v1beta/models/{model}:generateContent` with the key in
+   the `x-goog-api-key` header. This is the only live path on Render.
+   The key value never appears in code, files, or logs.
+2. **Local helper** — without a key, on this machine, the stored
+   `custom.gemini` credential is used via its helper
+   (`~/workspace/custom-connectors/custom.gemini/bin/client.py`).
+Set `GEMINI_LIVE=1` in `.env` (see `.env.example`) to try live calls
+per incident. The investigator tries the models in order —
+`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite` — one attempt
+each (~15s timeout), then one retry of the first model via the helper,
+and falls back to the mock on any failure. `GEMINI_MODEL` overrides
+the first model.
 
 Verified Nov 2, 2026 by direct generate calls and one full live
 investigation end to end: `gemini-3.5-flash` replied "OK live" twice
@@ -135,9 +202,12 @@ Still failing with the new key: `gemini-3.8-flash` hangs / times out
 at 60s, `gemini-2.5-flash`, `gemini-2.5-flash-lite` and `gemini-2.5-pro`
 all return HTTP 404.
 
-On Render the helper binary does not exist, so live calls fail fast
-and the hosted demo always uses the mock. `GEMINI_LIVE` stays `0`
-unless you opt in locally.
+On Render the helper binary does not exist, so the helper path fails
+fast there and the direct REST path is used instead — live Gemini on
+the hosted demo needs only `GEMINI_API_KEY` set in the Render
+dashboard (see "Live on Render" above). With no key anywhere, the
+demo falls back to the mock. Locally, `GEMINI_LIVE` stays `0` unless
+you opt in.
 
 ## What was cut for the MVP
 

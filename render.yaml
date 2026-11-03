@@ -2,6 +2,13 @@
 # Dashboard + API on one URL (e.g. https://aiops-agent.onrender.com).
 # Free tier spins down after inactivity (first load ~50s) and in-memory
 # incidents/audit reset on restart — same as local runs.
+#
+# Live Gemini on the hosted demo: GEMINI_LIVE is 1 here, but the
+# investigator only calls Gemini when GEMINI_API_KEY is set. That key
+# is declared with sync: false, so Render asks for its value in the
+# dashboard (Environment tab) and it is never stored in this file or
+# in the repo. With no key set, the app still works — it falls back
+# to the deterministic mock investigator.
 services:
   - type: web
     name: aiops-agent
@@ -10,4 +17,8 @@ services:
     plan: free
     envVars:
       - key: GEMINI_LIVE
-        value: "0"
+        value: "1"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false

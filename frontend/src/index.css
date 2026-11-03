@@ -70,6 +70,51 @@ h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
 }
 .stat-value { transition: color 0.3s ease; }
 
+/* Pipeline strip — Detector → Investigator → Guardian → Human → Executor */
+.pipeline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.pipeline-label { color: var(--muted); font-weight: 600; margin-right: 2px; }
+.pipe-step {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pipe-idle, .pipe-todo { color: var(--muted); }
+.pipe-done { border-color: var(--green); color: #86efac; background: #14532d; }
+.pipe-current {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+  font-weight: 700;
+  animation: pulse-ring 1.6s ease-in-out infinite;
+}
+.pipe-arrow { color: var(--muted); }
+
+/* Investigator source badges — visible at a glance on the incident card */
+.source-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.source-gemini { background: #14532d; color: #86efac; border: 1px solid #22c55e; }
+.source-mock { background: #713f12; color: #fcd34d; border: 1px solid #f59e0b; }
+.pill-gemini { color: #86efac; border-color: #22c55e; }
+
 /* Guided demo + chaos hints */
 .guided-hint {
   background: #12233d;

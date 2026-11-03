@@ -19,9 +19,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-load_dotenv()  # reads .env for GEMINI_LIVE / GEMINI_MODEL, if present.
-# No API key is used anywhere: live Gemini goes through the stored
-# custom.gemini credential via its helper; default is the mock investigator.
+load_dotenv()  # reads .env for GEMINI_LIVE / GEMINI_MODEL / GEMINI_API_KEY, if present.
+# Live Gemini has two paths (see backend/investigator.py): a direct
+# REST call when GEMINI_API_KEY is set (env var / Render dashboard),
+# or the stored custom.gemini credential via its helper on this
+# machine. No key value ever appears in code or files; default is
+# the mock investigator.
 
 from . import audit, detector, executor, guardian, investigator, simulator, store
 
@@ -71,6 +74,7 @@ async def _investigate(incident):
     incident["investigation"] = result
     incident["guardian"] = guardian.evaluate(result["confidence"])
     incident["status"] = incident["guardian"]["decision"]
+    store.save_incident(incident)  # persist (no-op when in-memory)
     store.add_timeline(
         incident, "guardian_decision",
         f"{incident['guardian']['decision']} — confidence {result['confidence']}% "
@@ -106,6 +110,9 @@ async def _sampler():
 
 @app.on_event("startup")
 async def startup():
+    # Optional Postgres persistence: no-op unless DATABASE_URL is set,
+    # and any DB failure falls back to the in-memory store (see store).
+    store.init_persistence()
     simulator.tick()
     asyncio.create_task(_sampler())
 
@@ -232,6 +239,7 @@ async def approve_incident(incident_id: str, req: ApproveRequest):
             detail="Guardian has not cleared this incident for approval",
         )
     incident["approved_by"] = req.approved_by
+    store.save_incident(incident)  # persist (no-op when in-memory)
     store.add_timeline(
         incident, "approved",
         f"approved by {req.approved_by} — action: {req.action}",
@@ -249,6 +257,7 @@ def reject_incident(incident_id: str, req: RejectRequest):
         raise HTTPException(status_code=404, detail="incident not found")
     incident["status"] = "rejected"
     incident["resolution"] = req.reason or "Rejected by human reviewer."
+    store.save_incident(incident)  # persist (no-op when in-memory)
     store.add_timeline(incident, "rejected", incident["resolution"])
     audit.log(incident["id"], req.rejected_by, "rejected", incident["resolution"])
     return incident

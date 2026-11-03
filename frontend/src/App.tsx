@@ -124,6 +124,37 @@ const OPEN_STATUSES = [
 ];
 const LATENCY_THRESHOLD_MS = 500;
 
+/** The five pipeline stages, shown as a strip under the header. */
+const PIPELINE_STEPS = [
+  "Detector",
+  "Investigator",
+  "Guardian",
+  "Human approval",
+  "Executor",
+] as const;
+
+/** Which pipeline step the active incident is on right now:
+ * -1 when calm, 5 when finished. Derived from the incident status —
+ * Guardian has already decided by the time the human is the current
+ * step, so needs_approval/needs_info maps to "Human approval". */
+function pipelineStage(inc: Incident | undefined): number {
+  if (!inc) return -1;
+  switch (inc.status) {
+    case "detected":
+      return 0;
+    case "investigating":
+      return 1;
+    case "needs_approval":
+    case "needs_info":
+      return 3;
+    case "approved":
+    case "executing":
+      return 4;
+    default:
+      return 5; // resolved / failed / rejected — every step is done
+  }
+}
+
 async function post(path: string, body: unknown) {
   const res = await fetch(`${API}${path}`, {
     method: "POST",
@@ -510,8 +541,9 @@ export default function App() {
         <div>
           <h1>Governed AIOps Agent</h1>
           <p className="sub">
-            Watches orders, inventory and payments, detects anomalies, explains
-            them, and asks a human to approve any fix. Nothing auto-fixes.
+            The agent watches orders, inventory and payments, explains
+            every incident with evidence, and never fixes anything
+            without a human approving.
           </p>
         </div>
         <div className="header-right">
@@ -519,7 +551,15 @@ export default function App() {
             <span className="pulse" /> LIVE
             {lastPoll ? ` · ${lastPoll.toLocaleTimeString()}` : ""}
           </span>
-          <span className="pill">investigator: {invSource}</span>
+          <span
+            className={`pill ${invSource === "gemini" ? "pill-gemini" : ""}`}
+          >
+            {invSource === "gemini"
+              ? "✦ investigator: live Gemini"
+              : invSource === "mock-fallback"
+                ? "investigator: mock · Gemini unavailable"
+                : `investigator: ${invSource}`}
+          </span>
           <button disabled={busy} onClick={runGuidedDemo}>
             ▶ Run guided demo
           </button>
@@ -548,6 +588,32 @@ export default function App() {
           there is no active incident and nothing is broken.
         </p>
       )}
+
+      <div className="pipeline" aria-label="How it works">
+        <span className="pipeline-label">How it works:</span>
+        {PIPELINE_STEPS.map((label, i) => {
+          const stage = pipelineStage(active);
+          const cls =
+            stage === -1
+              ? "pipe-idle"
+              : i < stage
+                ? "pipe-done"
+                : i === stage
+                  ? "pipe-current"
+                  : "pipe-todo";
+          return [
+            <span className={`pipe-step ${cls}`} key={label}>
+              {i < stage ? "✓ " : ""}
+              {label}
+            </span>,
+            i < PIPELINE_STEPS.length - 1 ? (
+              <span className="pipe-arrow" key={`${label}-arrow`} aria-hidden="true">
+                →
+              </span>
+            ) : null,
+          ];
+        })}
+      </div>
 
       {error && <p className="error">{error}</p>}
 
@@ -736,8 +802,18 @@ export default function App() {
                     <span>
                       Confidence <strong>{active.investigation.confidence}%</strong>
                     </span>
-                    <span className="muted small">
-                      source: {active.investigation.source}
+                    <span
+                      className={`source-badge ${
+                        active.investigation.source === "gemini"
+                          ? "source-gemini"
+                          : "source-mock"
+                      }`}
+                    >
+                      {active.investigation.source === "gemini"
+                        ? "✦ Live Gemini"
+                        : active.investigation.source === "mock-fallback"
+                          ? "Mock · Gemini unavailable"
+                          : "Mock investigator"}
                     </span>
                   </div>
                   <div className="meter">
