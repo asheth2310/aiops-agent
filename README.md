@@ -31,7 +31,12 @@ the incident, read the cause + evidence, click Approve, watch it recover.
 4. Confidence 70 and above still needs a human to approve — the MVP never auto-fixes.
 5. Every step (detect, investigate, guardian, approve/reject, fix) is written to the audit trail.
 
-## Demo results (measured Nov 2, 2026, in this VM, mock investigator)
+## Hosted
+
+One Render web service (free tier) runs the Dockerfile: it builds the
+React dashboard, then FastAPI serves the dashboard + API on one URL.
+`render.yaml` is the Blueprint for it. Free tier spins down after
+inactivity (first load ~50s) and in-memory state resets on restart.
 
 | Run | Fault | Time to detect | Confidence | Cause correct? | Time to recover* |
 |-----|-------|----------------|------------|----------------|------------------|
@@ -61,8 +66,8 @@ with `source: gemini`.
 ## What was cut for the MVP
 
 Kafka, Redis, Postgres, LangGraph, RAG / vector DB, real login and
-RBAC (one hard-coded admin approver), auto-remediation, alerting,
-deployment. Metrics, logs, incidents and audit are in-memory and
+RBAC (one hard-coded admin approver), auto-remediation, alerting.
+Metrics, logs, incidents and audit are in-memory and
 reset on restart. One failure type per demo run (latency or errors).
 
 ## Files
