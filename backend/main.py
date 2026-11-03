@@ -129,7 +129,7 @@ def root():
 
 @app.get("/health")
 def get_health():
-    return simulator.health()
+    return {**simulator.health(), "investigator_live": investigator.live_available()}
 
 
 @app.get("/logs")

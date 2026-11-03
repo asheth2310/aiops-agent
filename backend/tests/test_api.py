@@ -27,6 +27,29 @@ def test_health_has_three_services(client):
         assert "uptime_pct" in svc
 
 
+def test_health_reports_investigator_live(client, monkeypatch):
+    """The header badge reads this: live only when GEMINI_LIVE=1 and
+    a live path exists (API key env var or the helper binary)."""
+    import os
+
+    from backend import investigator
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_LIVE", "0")
+    monkeypatch.setattr(investigator, "HELPER", "/nonexistent/helper.py")
+    assert client.get("/health").json()["investigator_live"] is False
+
+    monkeypatch.setenv("GEMINI_LIVE", "1")
+    assert client.get("/health").json()["investigator_live"] is False
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-a-real-credential")
+    assert client.get("/health").json()["investigator_live"] is True
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(investigator, "HELPER", os.path.abspath(__file__))
+    assert client.get("/health").json()["investigator_live"] is True
+
+
 def test_metrics_404_for_unknown_service(client):
     resp = client.get("/metrics?service=nope")
     assert resp.status_code == 404

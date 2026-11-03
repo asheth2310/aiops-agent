@@ -176,6 +176,24 @@ def _call_gemini_rest(prompt, model, api_key):
         return None
 
 
+def live_available():
+    """True when a live Gemini call is possible right now.
+
+    GEMINI_LIVE must be "1" and at least one live path must exist: a
+    GEMINI_API_KEY env var (direct REST, the Render path) or the local
+    helper binary (stored credential). Only whether a key is set is
+    checked — the key value is never read, logged, or returned.
+    The dashboard uses this for its header badge, so it can say
+    "live Gemini" from page load instead of defaulting to mock until
+    the first incident is investigated.
+    """
+    if os.environ.get("GEMINI_LIVE", "0") != "1":
+        return False
+    if os.environ.get("GEMINI_API_KEY", "").strip():
+        return True
+    return os.path.exists(HELPER)
+
+
 def _try_live_models(prompt, logs):
     """Try the model list in order, then one retry of the first model.
 

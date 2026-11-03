@@ -346,6 +346,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastPoll, setLastPoll] = useState<Date | null>(null);
+  const [investigatorLive, setInvestigatorLive] = useState(false);
   const [chaosMode, setChaosMode] = useState(false);
   const [guidedHint, setGuidedHint] = useState(false);
   const [selectedService, setSelectedService] = useState<string | null>(null);
@@ -365,6 +366,7 @@ export default function App() {
         fetch(`${API}/logs?limit=30`).then((r) => r.json()),
       ]);
       setServices(h.services);
+      setInvestigatorLive(Boolean(h.investigator_live));
       setIncidents(i.incidents);
       setAudit(a.audit);
       setLogs(l.logs);
@@ -458,11 +460,14 @@ export default function App() {
               1000,
           0,
         ) / resolved.length;
-  // Investigator source: from the newest incident that has one, else the
-  // honest default — the mock is the default investigator.
+  // Investigator source: from the newest incident that has one, else
+  // the configured live state from /health — so the header badge says
+  // "live Gemini" from page load instead of defaulting to mock until
+  // the first incident is investigated. A real incident's source still
+  // wins: if live Gemini ever fails and falls back, the badge says so.
   const invSource =
     [...incidents].reverse().find((i) => i.investigation)?.investigation?.source ??
-    "mock";
+    (investigatorLive ? "gemini" : "mock");
 
   const doBreak = async (service: string, type: string) => {
     setBusy(true);
